@@ -3,7 +3,7 @@ using System.IO;
 
 namespace common;
 
-public sealed record ServiceDirectory : IArtifactDirectory
+public readonly record struct ServiceDirectory : IArtifactDirectory
 {
     public ArtifactPath Path { get; }
 
@@ -13,12 +13,12 @@ public sealed record ServiceDirectory : IArtifactDirectory
     }
 }
 
-public sealed record ServiceUri : IArtifactUri
+public readonly record struct ServiceUri
 {
-    public Uri Uri { get; }
+    public Uri Value { get; }
 
     public ServiceUri(Uri uri)
     {
-        Uri = uri;
+        Value= uri;
     }
 }

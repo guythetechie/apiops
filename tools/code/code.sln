@@ -11,6 +11,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "publisher", "publisher\publ
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "publisher.integration.tests", "publisher.integration.tests\publisher.integration.tests.csproj", "{F4762698-736D-4F5A-98D0-40D7CC9905AD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "extractor.integration.tests", "extractor.integration.tests\extractor.integration.tests.csproj", "{274E2DBF-AA66-4F26-BC91-05782F4775ED}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,6 +35,10 @@ Global
 		{F4762698-736D-4F5A-98D0-40D7CC9905AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F4762698-736D-4F5A-98D0-40D7CC9905AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F4762698-736D-4F5A-98D0-40D7CC9905AD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{274E2DBF-AA66-4F26-BC91-05782F4775ED}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{274E2DBF-AA66-4F26-BC91-05782F4775ED}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{274E2DBF-AA66-4F26-BC91-05782F4775ED}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{274E2DBF-AA66-4F26-BC91-05782F4775ED}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

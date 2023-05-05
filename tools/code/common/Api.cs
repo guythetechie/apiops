@@ -1,21 +1,14 @@
-﻿using System;
-using System.Linq;
+﻿using Azure.Core;
+using Azure.ResourceManager.ApiManagement;
+using Azure.ResourceManager.ApiManagement.Models;
+using LanguageExt;
+using System;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace common;
 
-public sealed record ApisUri : IArtifactUri
-{
-    public Uri Uri { get; }
-
-    public ApisUri(ServiceUri serviceUri)
-    {
-        Uri = serviceUri.AppendPath("apis");
-    }
-}
-
-public sealed record ApisDirectory : IArtifactDirectory
+public readonly record struct ApisDirectory : IArtifactDirectory
 {
     public static string Name { get; } = "apis";
 
@@ -30,34 +23,24 @@ public sealed record ApisDirectory : IArtifactDirectory
     }
 }
 
-public sealed record ApiName
+public readonly record struct ApiName
 {
-    private readonly string value;
-
     public ApiName(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException($"API name cannot be null or whitespace.", nameof(value));
+            throw new ArgumentException("API name cannot be null or whitespace.", nameof(value));
         }
 
-        this.value = value;
+        Value = value;
     }
 
-    public override string ToString() => value;
+    public string Value { get; }
+
+    public override string ToString() => Value;
 }
 
-public sealed record ApiUri : IArtifactUri
-{
-    public Uri Uri { get; }
-
-    public ApiUri(ApiName apiName, ApisUri apisUri)
-    {
-        Uri = apisUri.AppendPath(apiName.ToString());
-    }
-}
-
-public sealed record ApiDirectory : IArtifactDirectory
+public readonly record struct ApiDirectory : IArtifactDirectory
 {
     public ArtifactPath Path { get; }
 
@@ -70,7 +53,7 @@ public sealed record ApiDirectory : IArtifactDirectory
     }
 }
 
-public sealed record ApiInformationFile : IArtifactFile
+public readonly record struct ApiInformationFile : IArtifactFile
 {
     public static string Name { get; } = "apiInformation.json";
 
@@ -86,416 +69,375 @@ public sealed record ApiInformationFile : IArtifactFile
         ApiDirectory = apiDirectory;
     }
 }
-
-public sealed record ApiModel
+public static partial class Serialization
 {
-    public required string Name { get; init; }
-
-    public required ApiCreateOrUpdateProperties Properties { get; init; }
-
-    public sealed record ApiCreateOrUpdateProperties
+    public static JsonObject Serialize(this ApiCreateOrUpdateContent content)
     {
-        public string? ApiRevision { get; init; }
-        public string? ApiRevisionDescription { get; init; }
-        public ApiTypeOption? ApiType { get; init; }
-        public string? ApiVersion { get; init; }
-        public string? ApiVersionDescription { get; init; }
-        public ApiVersionSetContractDetails? ApiVersionSet { get; init; }
-        public string? ApiVersionSetId { get; init; }
-        public AuthenticationSettingsContract? AuthenticationSettings { get; init; }
-        public ApiContactInformation? Contact { get; init; }
-        public string? Description { get; init; }
-        public string? DisplayName { get; init; }
-        public ApiFormatOption? Format { get; init; }
-        public bool? IsCurrent { get; init; }
-        public ApiLicenseInformation? License { get; init; }
-        public string? Path { get; init; }
-        public ProtocolOption[]? Protocols { get; init; }
-        public string? ServiceUrl { get; init; }
-        public string? SourceApiId { get; init; }
-        public SubscriptionKeyParameterNamesContract? SubscriptionKeyParameterNames { get; init; }
-        public bool? SubscriptionRequired { get; init; }
-        public string? TermsOfServiceUrl { get; init; }
-        public ApiTypeOption? Type { get; init; }
-        public string? Value { get; init; }
-        public ApiCreateOrUpdatePropertiesWsdlSelector? WsdlSelector { get; init; }
+        var json = new JsonObject()
+            .AddPropertyIfNotNull("apiRevision", content.ApiRevision)
+            .AddPropertyIfNotNull("apiRevisionDescription", content.ApiRevisionDescription)
+            .AddPropertyIfNotNull("apiType", content.SoapApiType?.Serialize())
+            .AddPropertyIfNotNull("apiVersion", content.ApiVersion)
+            .AddPropertyIfNotNull("apiVersionDescription", content.ApiVersionDescription)
+            .AddPropertyIfNotNull("apiVersionSet", content.ApiVersionSet?.Serialize())
+            .AddPropertyIfNotNull("apiVersionSetId", content.ApiVersionSetId?.Serialize())
+            .AddPropertyIfNotNull("authenticationSettings", content.AuthenticationSettings?.Serialize())
+            .AddPropertyIfNotNull("contact", content.Contact?.Serialize())
+            .AddPropertyIfNotNull("description", content.Description)
+            .AddPropertyIfNotNull("displayName", content.DisplayName)
+            .AddPropertyIfNotNull("format", content.Format?.Serialize())
+            .AddPropertyIfNotNull("isCurrent", content.IsCurrent)
+            .AddPropertyIfNotNull("license", content.License?.Serialize())
+            .AddPropertyIfNotNull("path", content.Path)
+            .AddPropertyIfNotNull("serviceUrl", content.ServiceUri?.AbsoluteUri)
+            .AddPropertyIfNotNull("sourceApiId", content.SourceApiId?.Serialize())
+            .AddPropertyIfNotNull("subscriptionKeyParameterNames", content.SubscriptionKeyParameterNames?.Serialize())
+            .AddPropertyIfNotNull("subscriptionRequired", content.IsSubscriptionRequired)
+            .AddPropertyIfNotNull("termsOfServiceUrl", content.TermsOfServiceUri?.AbsoluteUri)
+            .AddPropertyIfNotNull("type", content.ApiType?.Serialize())
+            .AddPropertyIfNotNull("value", content.Value)
+            .AddPropertyIfNotNull("wsdlSelector", content.WsdlSelector?.Serialize());
 
-        public JsonObject Serialize() =>
-            new JsonObject()
-                .AddPropertyIfNotNull("apiRevision", ApiRevision)
-                .AddPropertyIfNotNull("apiRevisionDescription", ApiRevisionDescription)
-                .AddPropertyIfNotNull("apiType", ApiType?.Serialize())
-                .AddPropertyIfNotNull("apiVersion", ApiVersion)
-                .AddPropertyIfNotNull("apiVersionDescription", ApiVersionDescription)
-                .AddPropertyIfNotNull("apiVersionSet", ApiVersionSet?.Serialize())
-                .AddPropertyIfNotNull("apiVersionSetId", ApiVersionSetId)
-                .AddPropertyIfNotNull("authenticationSettings", AuthenticationSettings?.Serialize())
-                .AddPropertyIfNotNull("contact", Contact?.Serialize())
-                .AddPropertyIfNotNull("description", Description)
-                .AddPropertyIfNotNull("displayName", DisplayName)
-                .AddPropertyIfNotNull("format", Format?.Serialize())
-                .AddPropertyIfNotNull("isCurrent", IsCurrent)
-                .AddPropertyIfNotNull("license", License?.Serialize())
-                .AddPropertyIfNotNull("path", Path)
-                .AddPropertyIfNotNull("protocols", Protocols?.Select(protocol => protocol.Serialize())
-                                                            ?.ToJsonArray())
-                .AddPropertyIfNotNull("serviceUrl", ServiceUrl)
-                .AddPropertyIfNotNull("sourceApiId", SourceApiId)
-                .AddPropertyIfNotNull("subscriptionKeyParameterNames", SubscriptionKeyParameterNames?.Serialize())
-                .AddPropertyIfNotNull("subscriptionRequired", SubscriptionRequired)
-                .AddPropertyIfNotNull("termsOfServiceUrl", TermsOfServiceUrl)
-                .AddPropertyIfNotNull("type", Type?.Serialize())
-                .AddPropertyIfNotNull("value", Value)
-                .AddPropertyIfNotNull("wsdlSelector", WsdlSelector?.Serialize());
-
-        public static ApiCreateOrUpdateProperties Deserialize(JsonObject jsonObject) =>
-            new()
-            {
-                ApiRevision = jsonObject.TryGetStringProperty("apiRevision"),
-                ApiRevisionDescription = jsonObject.TryGetStringProperty("apiRevisionDescription"),
-                ApiType = jsonObject.TryGetProperty("apiType")
-                                    .Map(ApiTypeOption.Deserialize),
-                ApiVersion = jsonObject.TryGetStringProperty("apiVersion"),
-                ApiVersionDescription = jsonObject.TryGetStringProperty("apiVersionDescription"),
-                ApiVersionSet = jsonObject.TryGetJsonObjectProperty("apiVersionSet")
-                                          .Map(ApiVersionSetContractDetails.Deserialize),
-                ApiVersionSetId = jsonObject.TryGetStringProperty("apiVersionSetId"),
-                AuthenticationSettings = jsonObject.TryGetJsonObjectProperty("authenticationSettings")
-                                                   .Map(AuthenticationSettingsContract.Deserialize),
-                Contact = jsonObject.TryGetJsonObjectProperty("contact")
-                                    .Map(ApiContactInformation.Deserialize),
-                Description = jsonObject.TryGetStringProperty("description"),
-                DisplayName = jsonObject.TryGetStringProperty("displayName"),
-                Format = jsonObject.TryGetProperty("format")
-                                   .Map(ApiFormatOption.Deserialize),
-                IsCurrent = jsonObject.TryGetBoolProperty("isCurrent"),
-                License = jsonObject.TryGetJsonObjectProperty("license")
-                                    .Map(ApiLicenseInformation.Deserialize),
-                Path = jsonObject.TryGetStringProperty("path"),
-                Protocols = jsonObject.TryGetJsonArrayProperty("protocols")
-                                      .Map(jsonArray => jsonArray.Choose(node => node is null ? null : ProtocolOption.Deserialize(node))
-                                                                 .ToArray()),
-                ServiceUrl = jsonObject.TryGetStringProperty("serviceUrl"),
-                SourceApiId = jsonObject.TryGetStringProperty("sourceApiId"),
-                SubscriptionKeyParameterNames = jsonObject.TryGetJsonObjectProperty("subscriptionKeyParameterNames")
-                                                          .Map(SubscriptionKeyParameterNamesContract.Deserialize),
-                SubscriptionRequired = jsonObject.TryGetBoolProperty("subscriptionRequired"),
-                TermsOfServiceUrl = jsonObject.TryGetStringProperty("termsOfServiceUrl"),
-                Type = jsonObject.TryGetProperty("type")
-                                 .Map(ApiTypeOption.Deserialize),
-                Value = jsonObject.TryGetStringProperty("value"),
-                WsdlSelector = jsonObject.TryGetJsonObjectProperty("wsdlSelector")
-                                         .Map(ApiCreateOrUpdatePropertiesWsdlSelector.Deserialize)
-            };
-
-        public sealed record ApiTypeOption
+        if (content.Protocols is not null)
         {
-            private readonly string value;
-
-            private ApiTypeOption(string value)
-            {
-                this.value = value;
-            }
-
-            public static ApiTypeOption GraphQl => new("graphql");
-            public static ApiTypeOption Http => new("http");
-            public static ApiTypeOption Soap => new("soap");
-            public static ApiTypeOption WebSocket => new("websocket");
-
-            public override string ToString() => value;
-
-            public JsonNode Serialize() => JsonValue.Create(ToString()) ?? throw new JsonException("Value cannot be null.");
-
-            public static ApiTypeOption Deserialize(JsonNode node) =>
-                node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
-                    ? value switch
-                    {
-                        _ when nameof(GraphQl).Equals(value, StringComparison.OrdinalIgnoreCase) => GraphQl,
-                        _ when nameof(Http).Equals(value, StringComparison.OrdinalIgnoreCase) => Http,
-                        _ when nameof(Soap).Equals(value, StringComparison.OrdinalIgnoreCase) => Soap,
-                        _ when nameof(WebSocket).Equals(value, StringComparison.OrdinalIgnoreCase) => WebSocket,
-                        _ => throw new JsonException($"'{value}' is not a valid {nameof(ApiTypeOption)}.")
-                    }
-                        : throw new JsonException("Node must be a string JSON value.");
+            json.AddPropertyIfNotNull("protocols", content.Protocols
+                                                          .Map(Serialize)
+                                                          .ToJsonArray());
         }
 
-        public sealed record ApiVersionSetContractDetails
-        {
-            public string? Description { get; init; }
-            public string? Id { get; init; }
-            public string? Name { get; init; }
-            public string? VersionHeaderName { get; init; }
-            public VersioningSchemeOption? VersioningScheme { get; init; }
-            public string? VersionQueryName { get; init; }
-
-            public JsonObject Serialize() =>
-                new JsonObject()
-                    .AddPropertyIfNotNull("description", Description)
-                    .AddPropertyIfNotNull("id", Id)
-                    .AddPropertyIfNotNull("name", Name)
-                    .AddPropertyIfNotNull("versionHeaderName", VersionHeaderName)
-                    .AddPropertyIfNotNull("apiType", VersioningScheme?.Serialize())
-                    .AddPropertyIfNotNull("versionQueryName", VersionQueryName);
-
-            public static ApiVersionSetContractDetails Deserialize(JsonObject jsonObject) =>
-                new()
-                {
-                    Description = jsonObject.TryGetStringProperty("description"),
-                    Id = jsonObject.TryGetStringProperty("id"),
-                    Name = jsonObject.TryGetStringProperty("name"),
-                    VersionHeaderName = jsonObject.TryGetStringProperty("versionHeaderName"),
-                    VersioningScheme = jsonObject.TryGetProperty("apiType").Map(VersioningSchemeOption.Deserialize),
-                    VersionQueryName = jsonObject.TryGetStringProperty("versionQueryName"),
-                };
-
-            public sealed record VersioningSchemeOption
-            {
-                private readonly string value;
-
-                private VersioningSchemeOption(string value)
-                {
-                    this.value = value;
-                }
-
-                public static VersioningSchemeOption Header => new("Header");
-                public static VersioningSchemeOption Query => new("Query");
-                public static VersioningSchemeOption Segment => new("Segment");
-
-                public override string ToString() => value;
-
-                public JsonNode Serialize() => JsonValue.Create(ToString()) ?? throw new JsonException("Value cannot be null.");
-
-                public static VersioningSchemeOption Deserialize(JsonNode node) =>
-                    node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
-                        ? value switch
-                        {
-                            _ when nameof(Header).Equals(value, StringComparison.OrdinalIgnoreCase) => Header,
-                            _ when nameof(Query).Equals(value, StringComparison.OrdinalIgnoreCase) => Query,
-                            _ when nameof(Segment).Equals(value, StringComparison.OrdinalIgnoreCase) => Segment,
-                            _ => throw new JsonException($"'{value}' is not a valid {nameof(VersioningSchemeOption)}.")
-                        }
-                        : throw new JsonException("Node must be a string JSON value.");
-            }
-        }
-
-        public sealed record AuthenticationSettingsContract
-        {
-            public OAuth2AuthenticationSettingsContract? OAuth2 { get; init; }
-            public OpenIdAuthenticationSettingsContract? OpenId { get; init; }
-
-            public JsonObject Serialize() =>
-                new JsonObject()
-                    .AddPropertyIfNotNull("oAuth2", OAuth2?.Serialize())
-                    .AddPropertyIfNotNull("openid", OpenId?.Serialize());
-
-            public static AuthenticationSettingsContract Deserialize(JsonObject jsonObject) =>
-                new()
-                {
-                    OAuth2 = jsonObject.TryGetJsonObjectProperty("oAuth2").Map(OAuth2AuthenticationSettingsContract.Deserialize),
-                    OpenId = jsonObject.TryGetJsonObjectProperty("openid").Map(OpenIdAuthenticationSettingsContract.Deserialize),
-                };
-
-            public sealed record OAuth2AuthenticationSettingsContract
-            {
-                public string? AuthorizationServerId { get; init; }
-                public string? Scope { get; init; }
-
-                public JsonObject Serialize() =>
-                    new JsonObject()
-                        .AddPropertyIfNotNull("authorizationServerId", AuthorizationServerId)
-                        .AddPropertyIfNotNull("scope", Scope);
-
-                public static OAuth2AuthenticationSettingsContract Deserialize(JsonObject jsonObject) =>
-                    new()
-                    {
-                        AuthorizationServerId = jsonObject.TryGetStringProperty("authorizationServerId"),
-                        Scope = jsonObject.TryGetStringProperty("scope")
-                    };
-            }
-
-            public sealed record OpenIdAuthenticationSettingsContract
-            {
-                public string[]? BearerTokenSendingMethods { get; init; }
-                public string? OpenIdProviderId { get; init; }
-
-                public JsonObject Serialize() =>
-                    new JsonObject()
-                        .AddPropertyIfNotNull("bearerTokenSendingMethods", BearerTokenSendingMethods?.Choose(method => (JsonNode?)method)
-                                                                                                    ?.ToJsonArray())
-                        .AddPropertyIfNotNull("openidProviderId", OpenIdProviderId);
-
-                public static OpenIdAuthenticationSettingsContract Deserialize(JsonObject jsonObject) =>
-                    new()
-                    {
-                        BearerTokenSendingMethods = jsonObject.TryGetJsonArrayProperty("bearerTokenSendingMethods")
-                                                              .Map(jsonArray => jsonArray.Choose(node => node?.GetValue<string>())
-                                                                                         .ToArray()),
-                        OpenIdProviderId = jsonObject.TryGetStringProperty("openidProviderId")
-                    };
-            }
-        }
-
-        public sealed record ApiContactInformation
-        {
-            public string? Email { get; init; }
-            public string? Name { get; init; }
-            public string? Url { get; init; }
-
-            public JsonObject Serialize() =>
-                new JsonObject()
-                    .AddPropertyIfNotNull("email", Email)
-                    .AddPropertyIfNotNull("name", Name)
-                    .AddPropertyIfNotNull("url", Url);
-
-            public static ApiContactInformation Deserialize(JsonObject jsonObject) =>
-                new()
-                {
-                    Email = jsonObject.TryGetStringProperty("email"),
-                    Name = jsonObject.TryGetStringProperty("name"),
-                    Url = jsonObject.TryGetStringProperty("url")
-                };
-        }
-
-        public sealed record ApiFormatOption
-        {
-            private readonly string value;
-
-            private ApiFormatOption(string value)
-            {
-                this.value = value;
-            }
-
-            public static ApiFormatOption GraphQl => new("graphql-link");
-            public static ApiFormatOption OpenApi => new("openapi");
-            public static ApiFormatOption OpenApiJson => new("openapi+json");
-            public static ApiFormatOption OpenApiJsonLink => new("openapi+json-link");
-            public static ApiFormatOption OpenApiLink => new("openapi-link");
-            public static ApiFormatOption SwaggerJson => new("swagger-json");
-            public static ApiFormatOption SwaggerLinkJson => new("swagger-link-json");
-            public static ApiFormatOption WadlLinkJson => new("wadl-link-json");
-            public static ApiFormatOption WadlXml => new("wadl-xml");
-            public static ApiFormatOption Wsdl => new("wsdl");
-            public static ApiFormatOption WsdlLink => new("wsdl-link");
-
-            public override string ToString() => value;
-
-            public JsonNode Serialize() => JsonValue.Create(ToString()) ?? throw new JsonException("Value cannot be null.");
-
-            public static ApiFormatOption Deserialize(JsonNode node) =>
-                node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
-                    ? value switch
-                    {
-                        _ when nameof(GraphQl).Equals(value, StringComparison.OrdinalIgnoreCase) => GraphQl,
-                        _ when nameof(OpenApi).Equals(value, StringComparison.OrdinalIgnoreCase) => OpenApi,
-                        _ when nameof(OpenApiJson).Equals(value, StringComparison.OrdinalIgnoreCase) => OpenApiJson,
-                        _ when nameof(OpenApiJsonLink).Equals(value, StringComparison.OrdinalIgnoreCase) => OpenApiJsonLink,
-                        _ when nameof(OpenApiLink).Equals(value, StringComparison.OrdinalIgnoreCase) => OpenApiLink,
-                        _ when nameof(SwaggerJson).Equals(value, StringComparison.OrdinalIgnoreCase) => SwaggerJson,
-                        _ when nameof(SwaggerLinkJson).Equals(value, StringComparison.OrdinalIgnoreCase) => SwaggerLinkJson,
-                        _ when nameof(WadlLinkJson).Equals(value, StringComparison.OrdinalIgnoreCase) => WadlLinkJson,
-                        _ when nameof(WadlXml).Equals(value, StringComparison.OrdinalIgnoreCase) => WadlXml,
-                        _ when nameof(Wsdl).Equals(value, StringComparison.OrdinalIgnoreCase) => Wsdl,
-                        _ when nameof(WsdlLink).Equals(value, StringComparison.OrdinalIgnoreCase) => WsdlLink,
-                        _ => throw new JsonException($"'{value}' is not a valid {nameof(ApiFormatOption)}.")
-                    }
-                        : throw new JsonException("Node must be a string JSON value.");
-        }
-
-        public sealed record ApiLicenseInformation
-        {
-            public string? Name { get; init; }
-            public string? Url { get; init; }
-
-            public JsonObject Serialize() =>
-                new JsonObject()
-                    .AddPropertyIfNotNull("name", Name)
-                    .AddPropertyIfNotNull("url", Url);
-
-            public static ApiLicenseInformation Deserialize(JsonObject jsonObject) =>
-                new()
-                {
-                    Name = jsonObject.TryGetStringProperty("name"),
-                    Url = jsonObject.TryGetStringProperty("url")
-                };
-        }
-
-        public sealed record ProtocolOption
-        {
-            private readonly string value;
-
-            private ProtocolOption(string value)
-            {
-                this.value = value;
-            }
-
-            public static ProtocolOption Http => new("http");
-            public static ProtocolOption Https => new("https");
-            public static ProtocolOption Ws => new("ws");
-            public static ProtocolOption Wss => new("wss");
-
-            public override string ToString() => value;
-
-            public JsonNode Serialize() => JsonValue.Create(ToString()) ?? throw new JsonException("Value cannot be null.");
-
-            public static ProtocolOption Deserialize(JsonNode node) =>
-                node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
-                    ? value switch
-                    {
-                        _ when nameof(Http).Equals(value, StringComparison.OrdinalIgnoreCase) => Http,
-                        _ when nameof(Https).Equals(value, StringComparison.OrdinalIgnoreCase) => Https,
-                        _ when nameof(Ws).Equals(value, StringComparison.OrdinalIgnoreCase) => Ws,
-                        _ when nameof(Wss).Equals(value, StringComparison.OrdinalIgnoreCase) => Wss,
-                        _ => throw new JsonException($"'{value}' is not a valid {nameof(ProtocolOption)}.")
-                    }
-                        : throw new JsonException("Node must be a string JSON value.");
-        }
-
-        public sealed record SubscriptionKeyParameterNamesContract
-        {
-            public string? Header { get; init; }
-            public string? Query { get; init; }
-
-            public JsonObject Serialize() =>
-                new JsonObject()
-                    .AddPropertyIfNotNull("header", Header)
-                    .AddPropertyIfNotNull("query", Query);
-
-            public static SubscriptionKeyParameterNamesContract Deserialize(JsonObject jsonObject) =>
-                new()
-                {
-                    Header = jsonObject.TryGetStringProperty("header"),
-                    Query = jsonObject.TryGetStringProperty("query")
-                };
-        }
-
-        public sealed record ApiCreateOrUpdatePropertiesWsdlSelector
-        {
-            public string? WsdlEndpointName { get; init; }
-            public string? WsdlServiceName { get; init; }
-
-            public JsonObject Serialize() =>
-                new JsonObject()
-                    .AddPropertyIfNotNull("wsdlEndpointName", WsdlEndpointName)
-                    .AddPropertyIfNotNull("wsdlServiceName", WsdlServiceName);
-
-            public static ApiCreateOrUpdatePropertiesWsdlSelector Deserialize(JsonObject jsonObject) =>
-                new()
-                {
-                    WsdlEndpointName = jsonObject.TryGetStringProperty("wsdlEndpointName"),
-                    WsdlServiceName = jsonObject.TryGetStringProperty("wsdlServiceName")
-                };
-        }
+        return json;
     }
 
-    public JsonObject Serialize() =>
-        new JsonObject()
-            .AddProperty("properties", Properties.Serialize());
+    public static ApiCreateOrUpdateContent DeserializeApiCreateOrUpdateContent(JsonObject jsonObject)
+    {
+        var content = new ApiCreateOrUpdateContent()
+        {
+            ApiRevision = jsonObject.TryGetStringProperty("apiRevision")
+                                    .IfLeftNull(),
+            ApiRevisionDescription = jsonObject.TryGetStringProperty("apiRevisionDescription")
+                                               .IfLeftNull(),
+            ApiType = jsonObject.TryGetProperty("type")
+                                .Map(DeserializeApiType)
+                                .IfLeftNull(),
+            ApiVersion = jsonObject.TryGetStringProperty("apiVersion")
+                                   .IfLeftNull(),
+            ApiVersionDescription = jsonObject.TryGetStringProperty("apiVersionDescription")
+                                              .IfLeftNull(),
+            ApiVersionSet = jsonObject.TryGetJsonObjectProperty("apiVersionSet")
+                                      .Map(DeserializeApiVersionSetContractDetails)
+                                      .IfLeftNull(),
+            ApiVersionSetId = jsonObject.TryGetProperty("apiVersionSetId")
+                                        .Map(DeserializeResourceIdentifier)
+                                        .IfLeftNull(),
+            AuthenticationSettings = jsonObject.TryGetJsonObjectProperty("authenticationSettings")
+                                               .Map(DeserializeAuthenticationSettingsContract)
+                                               .IfLeftNull(),
+            Contact = jsonObject.TryGetJsonObjectProperty("contact")
+                                .Map(DeserializeApiContactInformation)
+                                .IfLeftNull(),
+            Description = jsonObject.TryGetStringProperty("description")
+                                    .IfLeftNull(),
+            DisplayName = jsonObject.TryGetStringProperty("displayName")
+                                    .IfLeftNull(),
+            Format = jsonObject.TryGetProperty("format")
+                               .Map(DeserializeContentFormat)
+                               .IfLeftNull(),
+            IsCurrent = jsonObject.TryGetBoolProperty("isCurrent")
+                                  .IfLeftNull(),
+            IsSubscriptionRequired = jsonObject.TryGetBoolProperty("subscriptionRequired")
+                                               .IfLeftNull(),
+            License = jsonObject.TryGetJsonObjectProperty("license")
+                                .Map(DeserializeApiLicenseInformation)
+                                .IfLeftNull(),
+            Path = jsonObject.TryGetStringProperty("path")
+                             .IfLeftNull(),
+            ServiceUri = jsonObject.TryGetUriProperty("serviceUrl")
+                                   .IfLeftNull(),
+            SoapApiType = jsonObject.TryGetProperty("apiType")
+                                    .Map(DeserializeSoapApiType)
+                                    .IfLeftNull(),
+            SourceApiId = jsonObject.TryGetProperty("sourceApiId")
+                                    .Map(DeserializeResourceIdentifier)
+                                    .IfLeftNull(),
+            SubscriptionKeyParameterNames = jsonObject.TryGetJsonObjectProperty("subscriptionKeyParameterNames")
+                                                      .Map(DeserializeSubscriptionKeyParameterNamesContract)
+                                                      .IfLeftNull(),
+            TermsOfServiceUri = jsonObject.TryGetUriProperty("termsOfServiceUrl")
+                                          .IfLeftNull(),
+            Value = jsonObject.TryGetStringProperty("value")
+                              .IfLeftNull(),
+            WsdlSelector = jsonObject.TryGetJsonObjectProperty("wsdlSelector")
+                                     .Map(DeserializeApiCreateOrUpdatePropertiesWsdlSelector)
+                                     .IfLeftNull()
+        };
 
-    public static ApiModel Deserialize(ApiName name, JsonObject jsonObject) =>
+        jsonObject.TryGetJsonArrayProperty("protocols")
+                  .Map(jsonArray => jsonArray.Choose(node => Prelude.Optional(node)))
+                  .Map(nodes => nodes.Map(DeserializeApiOperationInvokableProtocol))
+                  .Iter(nodes => nodes.Iter(content.Protocols.Add));
+
+        return content;
+    }
+
+    public static JsonNode Serialize(this ApiType apiType)
+        => JsonValue.Create(apiType.ToString()) ?? throw new JsonException("Value cannot be null.");
+
+    public static ApiType DeserializeApiType(JsonNode node) =>
+        node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
+            ? value switch
+            {
+                _ when value.Equals(ApiType.Http.ToString(), StringComparison.OrdinalIgnoreCase) => ApiType.Http,
+                _ when value.Equals(ApiType.Soap.ToString(), StringComparison.OrdinalIgnoreCase) => ApiType.Soap,
+                _ when value.Equals(ApiType.WebSocket.ToString(), StringComparison.OrdinalIgnoreCase) => ApiType.WebSocket,
+                _ when value.Equals(ApiType.GraphQL.ToString(), StringComparison.OrdinalIgnoreCase) => ApiType.GraphQL,
+                _ => throw new JsonException($"'{value}' is not a valid api type.")
+            }
+            : throw new JsonException("Node must be a string JSON value.");
+
+    public static JsonNode Serialize(this SoapApiType apiType)
+        => JsonValue.Create(apiType.ToString()) ?? throw new JsonException("Value cannot be null.");
+
+    public static SoapApiType DeserializeSoapApiType(JsonNode node) =>
+        node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
+            ? value switch
+            {
+                _ when value.Equals(SoapApiType.SoapToRest.ToString(), StringComparison.OrdinalIgnoreCase) => SoapApiType.SoapToRest,
+                _ when value.Equals(SoapApiType.SoapPassThrough.ToString(), StringComparison.OrdinalIgnoreCase) => SoapApiType.SoapPassThrough,
+                _ when value.Equals(SoapApiType.WebSocket.ToString(), StringComparison.OrdinalIgnoreCase) => SoapApiType.WebSocket,
+                _ when value.Equals(SoapApiType.GraphQL.ToString(), StringComparison.OrdinalIgnoreCase) => SoapApiType.GraphQL,
+                _ => throw new JsonException($"'{value}' is not a valid api type.")
+            }
+            : throw new JsonException("Node must be a string JSON value.");
+
+    public static JsonObject Serialize(this ApiVersionSetContractDetails contractDetails) =>
+        new JsonObject()
+            .AddPropertyIfNotNull("description", contractDetails.Description)
+            .AddPropertyIfNotNull("id", contractDetails.Id)
+            .AddPropertyIfNotNull("name", contractDetails.Name)
+            .AddPropertyIfNotNull("versionHeaderName", contractDetails.VersionHeaderName)
+            .AddPropertyIfNotNull("versioningScheme", contractDetails.VersioningScheme?.Serialize())
+            .AddPropertyIfNotNull("versionQueryName", contractDetails.VersionQueryName);
+
+    public static ApiVersionSetContractDetails DeserializeApiVersionSetContractDetails(JsonObject jsonObject) =>
         new()
         {
-            Name = jsonObject.TryGetStringProperty("name") ?? name.ToString(),
-            Properties = jsonObject.GetJsonObjectProperty("properties")
-                                   .Map(ApiCreateOrUpdateProperties.Deserialize)!
+            Description = jsonObject.TryGetStringProperty("description")
+                                    .IfLeftNull(),
+            Id = jsonObject.TryGetStringProperty("id")
+                           .IfLeftNull(),
+            Name = jsonObject.TryGetStringProperty("name")
+                             .IfLeftNull(),
+            VersionHeaderName = jsonObject.TryGetStringProperty("versionHeaderName")
+                                          .IfLeftNull(),
+            VersioningScheme = jsonObject.TryGetProperty("versioningScheme")
+                                         .Map(DeserializeVersioningScheme)
+                                         .IfLeftNull(),
+            VersionQueryName = jsonObject.TryGetStringProperty("versionQueryName")
+                                         .IfLeftNull()
         };
+
+    public static JsonNode Serialize(this VersioningScheme versioningScheme)
+        => JsonValue.Create(versioningScheme.ToString()) ?? throw new JsonException("Value cannot be null.");
+
+    public static VersioningScheme DeserializeVersioningScheme(JsonNode node) =>
+        node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
+            ? value switch
+            {
+                _ when value.Equals(VersioningScheme.Header.ToString(), StringComparison.OrdinalIgnoreCase) => VersioningScheme.Header,
+                _ when value.Equals(VersioningScheme.Query.ToString(), StringComparison.OrdinalIgnoreCase) => VersioningScheme.Query,
+                _ when value.Equals(VersioningScheme.Segment.ToString(), StringComparison.OrdinalIgnoreCase) => VersioningScheme.Segment,
+                _ => throw new JsonException($"'{value}' is not a valid versioning scheme.")
+            }
+            : throw new JsonException("Node must be a string JSON value.");
+
+    public static JsonObject Serialize(this AuthenticationSettingsContract contract) =>
+        new JsonObject()
+            .AddPropertyIfNotNull("oAuth2", contract.OAuth2?.Serialize())
+            .AddPropertyIfNotNull("openid", contract.OpenId?.Serialize());
+
+    public static AuthenticationSettingsContract DeserializeAuthenticationSettingsContract(JsonObject jsonObject) =>
+        new()
+        {
+            OAuth2 = jsonObject.TryGetJsonObjectProperty("oAuth2")
+                               .Map(DeserializeOAuth2AuthenticationSettingsContract)
+                               .IfLeftNull(),
+            OpenId = jsonObject.TryGetJsonObjectProperty("openid")
+                               .Map(DeserializeOpenIdAuthenticationSettingsContract)
+                               .IfLeftNull()
+        };
+
+    public static JsonObject Serialize(this OAuth2AuthenticationSettingsContract contract) =>
+        new JsonObject()
+            .AddPropertyIfNotNull("authorizationServerId", contract.AuthorizationServerId)
+            .AddPropertyIfNotNull("scope", contract.Scope);
+
+    public static OAuth2AuthenticationSettingsContract DeserializeOAuth2AuthenticationSettingsContract(JsonObject jsonObject) =>
+        new()
+        {
+            AuthorizationServerId = jsonObject.TryGetStringProperty("authorizationServerId")
+                                              .IfLeftNull(),
+            Scope = jsonObject.TryGetStringProperty("scope")
+                              .IfLeftNull()
+        };
+
+    public static JsonObject Serialize(this OpenIdAuthenticationSettingsContract contract)
+    {
+        var json = new JsonObject()
+                        .AddPropertyIfNotNull("openidProviderId", contract.OpenIdProviderId);
+
+        if (contract.BearerTokenSendingMethods is not null)
+        {
+            json.AddProperty("bearerTokenSendingMethods", contract.BearerTokenSendingMethods
+                                                                  .Choose(method => Prelude.Optional((JsonNode?)method.ToString()))
+                                                                  .ToJsonArray());
+        }
+
+        return json;
+    }
+
+    public static OpenIdAuthenticationSettingsContract DeserializeOpenIdAuthenticationSettingsContract(JsonObject jsonObject)
+    {
+        var contract = new OpenIdAuthenticationSettingsContract()
+        {
+            OpenIdProviderId = jsonObject.TryGetStringProperty("openidProviderId")
+                                         .IfLeftNull()
+        };
+
+        jsonObject.TryGetJsonArrayProperty("bearerTokenSendingMethods")
+                  .Map(jsonArray => jsonArray.Choose(node => node.TryAsJsonValue()
+                                                                 .Bind(value => value.TryGetValue<string>()))
+                                             .Map(method => new BearerTokenSendingMethod(method)))
+                  .Iter(methods => methods.Iter(contract.BearerTokenSendingMethods.Add));
+
+        return contract;
+    }
+
+    public static JsonObject Serialize(this ApiContactInformation contactInformation) =>
+        new JsonObject()
+            .AddPropertyIfNotNull("email", contactInformation.Email)
+            .AddPropertyIfNotNull("name", contactInformation.Name)
+            .AddPropertyIfNotNull("url", contactInformation.Uri.ToString());
+
+    public static ApiContactInformation DeserializeApiContactInformation(JsonObject jsonObject) =>
+        new()
+        {
+            Email = jsonObject.TryGetStringProperty("email")
+                              .IfLeftNull(),
+            Name = jsonObject.TryGetStringProperty("name")
+                             .IfLeftNull(),
+            Uri = jsonObject.TryGetUriProperty("url")
+                            .IfLeftNull()
+        };
+
+    public static JsonNode Serialize(this ContentFormat format)
+        => JsonValue.Create(format.ToString()) ?? throw new JsonException("Value cannot be null.");
+
+    public static ContentFormat DeserializeContentFormat(JsonNode node) =>
+        node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
+            ? value switch
+            {
+                _ when value.Equals(ContentFormat.WadlXml.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.WadlXml,
+                _ when value.Equals(ContentFormat.WadlLinkJson.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.WadlLinkJson,
+                _ when value.Equals(ContentFormat.SwaggerJson.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.SwaggerJson,
+                _ when value.Equals(ContentFormat.SwaggerLinkJson.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.SwaggerLinkJson,
+                _ when value.Equals(ContentFormat.Wsdl.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.Wsdl,
+                _ when value.Equals(ContentFormat.WsdlLink.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.WsdlLink,
+                _ when value.Equals(ContentFormat.OpenApi.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.OpenApi,
+                _ when value.Equals(ContentFormat.OpenApiJson.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.OpenApiJson,
+                _ when value.Equals(ContentFormat.OpenApiLink.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.OpenApiLink,
+                _ when value.Equals(ContentFormat.OpenApiJsonLink.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.OpenApiJsonLink,
+                _ when value.Equals(ContentFormat.GraphQLLink.ToString(), StringComparison.OrdinalIgnoreCase) => ContentFormat.GraphQLLink,
+                _ => throw new JsonException($"'{value}' is not a valid content format.")
+            }
+            : throw new JsonException("Node must be a string JSON value.");
+
+    public static JsonObject Serialize(this ApiLicenseInformation licenseInformation) =>
+        new JsonObject()
+            .AddPropertyIfNotNull("name", licenseInformation.Name)
+            .AddPropertyIfNotNull("url", licenseInformation.Uri.ToString());
+
+    public static ApiLicenseInformation DeserializeApiLicenseInformation(JsonObject jsonObject) =>
+        new()
+        {
+            Name = jsonObject.TryGetStringProperty("name")
+                             .IfLeftNull(),
+            Uri = jsonObject.TryGetUriProperty("url")
+                            .IfLeftNull()
+        };
+
+    public static JsonNode Serialize(ApiOperationInvokableProtocol protocol) =>
+        JsonValue.Create(protocol.ToString()) ?? throw new JsonException("Value cannot be null.");
+
+    public static ApiOperationInvokableProtocol DeserializeApiOperationInvokableProtocol(JsonNode node) =>
+        node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var value)
+            ? value switch
+            {
+                _ when value.Equals(ApiOperationInvokableProtocol.Http.ToString(), StringComparison.OrdinalIgnoreCase) => ApiOperationInvokableProtocol.Http,
+                _ when value.Equals(ApiOperationInvokableProtocol.Https.ToString(), StringComparison.OrdinalIgnoreCase) => ApiOperationInvokableProtocol.Https,
+                _ when value.Equals(ApiOperationInvokableProtocol.Ws.ToString(), StringComparison.OrdinalIgnoreCase) => ApiOperationInvokableProtocol.Ws,
+                _ when value.Equals(ApiOperationInvokableProtocol.Wss.ToString(), StringComparison.OrdinalIgnoreCase) => ApiOperationInvokableProtocol.Wss,
+                _ => throw new JsonException($"'{value}' is not a valid protocol.")
+            }
+            : throw new JsonException("Node must be a string JSON value.");
+
+    public static JsonObject Serialize(this ApiCreateOrUpdatePropertiesWsdlSelector selector) =>
+        new JsonObject()
+            .AddPropertyIfNotNull("wsdlEndpointName", selector.WsdlEndpointName)
+            .AddPropertyIfNotNull("wsdlServiceName", selector.WsdlServiceName);
+
+    public static ApiCreateOrUpdatePropertiesWsdlSelector DeserializeApiCreateOrUpdatePropertiesWsdlSelector(JsonObject jsonObject) =>
+        new()
+        {
+            WsdlEndpointName = jsonObject.TryGetStringProperty("wsdlEndpointName")
+                                         .IfLeftNull(),
+            WsdlServiceName = jsonObject.TryGetStringProperty("wsdlServiceName")
+                                        .IfLeftNull()
+        };
+
+    public static JsonObject Serialize(this SubscriptionKeyParameterNamesContract contract) =>
+        new JsonObject()
+            .AddPropertyIfNotNull("header", contract.Header)
+            .AddPropertyIfNotNull("query", contract.Query);
+
+    public static SubscriptionKeyParameterNamesContract DeserializeSubscriptionKeyParameterNamesContract(JsonObject jsonObject) =>
+        new()
+        {
+            Header = jsonObject.TryGetStringProperty("header")
+                               .IfLeftNull(),
+            Query = jsonObject.TryGetStringProperty("query")
+                              .IfLeftNull()
+        };
+}
+
+public static class ApiDataExtensions
+{
+    public static ApiCreateOrUpdateContent ToCreateOrUpdateContent(this ApiData data)
+    {
+        var content = new ApiCreateOrUpdateContent
+        {
+            ApiRevision = data.ApiRevision,
+            ApiRevisionDescription = data.ApiRevisionDescription,
+            ApiType = data.ApiType,
+            ApiVersion = data.ApiVersion,
+            ApiVersionDescription = data.ApiVersionDescription,
+            ApiVersionSet = data.ApiVersionSet,
+            ApiVersionSetId = data.ApiVersionSetId,
+            AuthenticationSettings = data.AuthenticationSettings,
+            Contact = data.Contact,
+            Description = data.Description,
+            DisplayName = data.DisplayName,
+            IsCurrent = data.IsCurrent,
+            IsSubscriptionRequired = data.IsSubscriptionRequired,
+            License = data.License,
+            Path = data.Path,
+            ServiceUri = data.ServiceUri,
+            SourceApiId = data.SourceApiId,
+            SubscriptionKeyParameterNames = data.SubscriptionKeyParameterNames,
+            TermsOfServiceUri = data.TermsOfServiceUri
+        };
+
+        data.Protocols.Iter(content.Protocols.Add);
+
+        return content;
+    }
 }

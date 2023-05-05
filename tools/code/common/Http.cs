@@ -1,9 +1,9 @@
 ﻿using Azure;
 using Azure.Core;
 using Azure.Core.Pipeline;
+using LanguageExt;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
@@ -24,9 +24,8 @@ public static class HttpPipelineExtensions
         {
             var responseJson = await pipeline.GetJsonObject(nextLink, cancellationToken);
 
-            var values = responseJson.TryGetJsonArrayProperty("value")
-                                     .Map(jsonArray => jsonArray.Choose(node => node as JsonObject))
-                         ?? Enumerable.Empty<JsonObject>();
+            var values = responseJson.TryGetJsonObjectArrayProperty("value")
+                                     .IfLeft(Seq<JsonObject>.Empty);
 
             foreach (var value in values)
             {
@@ -34,7 +33,8 @@ public static class HttpPipelineExtensions
             }
 
             nextLink = responseJson.TryGetStringProperty("nextLink")
-                                   .Map(x => new Uri(x));
+                                   .Map(x => new Uri(x))
+                                   .IfLeftNull();
         }
     }
 
@@ -47,7 +47,7 @@ public static class HttpPipelineExtensions
 
     public static async ValueTask<BinaryData> GetContent(this HttpPipeline pipeline, Uri uri, CancellationToken cancellationToken)
     {
-        var request = pipeline.CreateRequest(uri, RequestMethod.Get);
+        using var request = pipeline.CreateRequest(uri, RequestMethod.Get);
 
         var response = await pipeline.SendRequestAsync(request, cancellationToken);
         response.Validate(uri);
@@ -57,14 +57,14 @@ public static class HttpPipelineExtensions
 
     public static async ValueTask DeleteResource(this HttpPipeline pipeline, Uri uri, CancellationToken cancellationToken)
     {
-        var request = pipeline.CreateRequest(uri, RequestMethod.Delete);
+        using var request = pipeline.CreateRequest(uri, RequestMethod.Delete);
         var response = await pipeline.SendRequestAsync(request, cancellationToken);
         response.Validate(uri);
     }
 
     public static async ValueTask PutResource(this HttpPipeline pipeline, Uri uri, JsonObject resource, CancellationToken cancellationToken)
     {
-        var request = pipeline.CreateRequest(uri, RequestMethod.Put);
+        using var request = pipeline.CreateRequest(uri, RequestMethod.Put);
         var resourceBytes = JsonSerializer.SerializeToUtf8Bytes(resource);
         request.Content = RequestContent.Create(resourceBytes);
         request.Headers.Add("Content-type", "application/json");
@@ -108,7 +108,7 @@ public static class HttpPipelineExtensions
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
             }
 
-            var request = pipeline.CreateRequest(locationUri, RequestMethod.Get);
+            using var request = pipeline.CreateRequest(locationUri, RequestMethod.Get);
             updatedResponse = await pipeline.SendRequestAsync(request, cancellationToken);
             updatedResponse.Validate(locationUri);
         }

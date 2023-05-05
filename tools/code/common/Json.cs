@@ -1,5 +1,8 @@
-﻿using System;
+﻿using LanguageExt;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -8,193 +11,292 @@ using System.Threading.Tasks;
 
 namespace common;
 
-internal static class JsonNodeExtensions
+internal static class JsonValueExtensions
 {
-    public static JsonNode Clone(this JsonNode node)
+    public static Option<T> TryGetValue<T>(this JsonValue jsonValue)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(node);
+        return jsonValue.TryGetValue<T>(out var value)
+                ? value
+                : Prelude.None;
+    }
+}
 
-        return JsonNode.Parse(bytes) ?? throw new InvalidOperationException("Could not deserialize JSON node.");
+public static class JsonNodeExtensions
+{
+    [return: NotNullIfNotNull(nameof(node))]
+    public static JsonNode? Clone(this JsonNode? node)
+    {
+        return node switch
+        {
+            JsonArray jsonArray => jsonArray.Map(node => node.Clone())
+                                            .ToJsonArray(),
+            JsonObject jsonObject => new JsonObject(jsonObject.Map(kvp => KeyValuePair.Create(kvp.Key, kvp.Value.Clone()))),
+            JsonValue jsonValue => (jsonValue.TryGetValue<bool>().Map(x => JsonValue.Create<bool>(x)!) ||
+                                    jsonValue.TryGetValue<byte>().Map(x => JsonValue.Create<byte>(x)!) ||
+                                    jsonValue.TryGetValue<char>().Map(x => JsonValue.Create<char>(x)!) ||
+                                    jsonValue.TryGetValue<DateTime>().Map(x => JsonValue.Create<DateTime>(x)!) ||
+                                    jsonValue.TryGetValue<DateTimeOffset>().Map(x => JsonValue.Create<DateTimeOffset>(x)!) ||
+                                    jsonValue.TryGetValue<decimal>().Map(x => JsonValue.Create<decimal>(x)!) ||
+                                    jsonValue.TryGetValue<double>().Map(x => JsonValue.Create<double>(x)!) ||
+                                    jsonValue.TryGetValue<Guid>().Map(x => JsonValue.Create<Guid>(x)!) ||
+                                    jsonValue.TryGetValue<short>().Map(x => JsonValue.Create<short>(x)!) ||
+                                    jsonValue.TryGetValue<int>().Map(x => JsonValue.Create<int>(x)!) ||
+                                    jsonValue.TryGetValue<long>().Map(x => JsonValue.Create<long>(x)!) ||
+                                    jsonValue.TryGetValue<sbyte>().Map(x => JsonValue.Create<sbyte>(x)!) ||
+                                    jsonValue.TryGetValue<float>().Map(x => JsonValue.Create<float>(x)!) ||
+                                    jsonValue.TryGetValue<string>().Map(x => JsonValue.Create<string>(x)!) ||
+                                    jsonValue.TryGetValue<ushort>().Map(x => JsonValue.Create<ushort>(x)!) ||
+                                    jsonValue.TryGetValue<uint>().Map(x => JsonValue.Create<uint>(x)!) ||
+                                    jsonValue.TryGetValue<ulong>().Map(x => JsonValue.Create<ulong>(x)!)
+                                   ).IfNone(() => throw new NotSupportedException()),
+            null => null,
+            _ => throw new NotImplementedException()
+        };
     }
 
-    public static JsonValue? TryAsJsonValue(this JsonNode node) => node as JsonValue;
+    public static Option<JsonValue> TryAsJsonValue(this JsonNode? node)
+    {
+        return node as JsonValue;
+    }
 
-    public static string AsString(this JsonNode node, string errorMessage) =>
-        node.TryAsString() ?? throw new InvalidOperationException(errorMessage);
+    public static Option<JsonObject> TryAsJsonObject(this JsonNode? node)
+    {
+        return node as JsonObject;
+    }
 
-    public static string? TryAsString(this JsonNode node) =>
-        node.TryAsJsonValue()
-            .Map(jsonValue => jsonValue.TryGetValue<string>(out var stringValue)
-                              ? stringValue
-                              : jsonValue.ToJsonElement().ValueKind is JsonValueKind.String or JsonValueKind.True or JsonValueKind.False or JsonValueKind.Number
-                                ? jsonValue.ToString()
-                                : null);
-
-    public static bool AsBool(this JsonNode node, string errorMessage) =>
-        node.TryAsBool() ?? throw new InvalidOperationException(errorMessage);
-
-    public static bool? TryAsBool(this JsonNode node) =>
-        node.TryAsJsonValue()
-            .Map(jsonValue => jsonValue.TryGetValue<bool>(out var boolValue)
-                              ? boolValue
-                              : jsonValue.TryGetValue<string>(out var stringValue)
-                                ? bool.TryParse(stringValue, out boolValue)
-                                  ? boolValue
-                                  : default(bool?)
-                                : default(bool?));
-
-    public static int AsInt(this JsonNode node, string errorMessage) =>
-        node.TryAsInt() ?? throw new InvalidOperationException(errorMessage);
-
-    public static int? TryAsInt(this JsonNode node) =>
-        node.TryAsJsonValue()
-            .Map(jsonValue => jsonValue.TryGetValue<int>(out var intValue)
-                              ? intValue
-                              : jsonValue.TryGetValue<string>(out var stringValue)
-                                ? int.TryParse(stringValue, out intValue)
-                                  ? intValue
-                                  : default(int?)
-                                : default(int?));
-    
-    public static double AsDouble(this JsonNode node, string errorMessage) =>
-        node.TryAsDouble() ?? throw new InvalidOperationException(errorMessage);
-
-    public static double? TryAsDouble(this JsonNode node) =>
-        node.TryAsJsonValue()
-            .Map(jsonValue => jsonValue.TryGetValue<double>(out var doubleValue)
-                              ? doubleValue
-                              : jsonValue.TryGetValue<string>(out var stringValue)
-                                ? double.TryParse(stringValue, out doubleValue)
-                                  ? doubleValue
-                                  : default(double?)
-                                : default(double?));
-
-    private static JsonElement ToJsonElement(this JsonNode node) => JsonSerializer.SerializeToElement(node);
-
-    public static JsonNode FromString(string value) =>
-        (JsonNode?)value ?? throw new InvalidOperationException("JSON node cannot be null if string is not null.");
+    public static Option<JsonArray> TryAsJsonArray(this JsonNode? node)
+    {
+        return node as JsonArray;
+    }
 }
 
 public static class JsonObjectExtensions
 {
-    public static JsonObject Clone(this JsonObject jsonObject) => JsonNodeExtensions.Clone(jsonObject).AsObject();
-
     public static JsonNode GetProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetNullableProperty(propertyName) ?? throw new InvalidOperationException($"Property '{propertyName}' is null.");
+        jsonObject.TryGetProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static JsonNode? GetNullableProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.TryGetPropertyValue(propertyName, out var node)
-            ? node
-            : throw new InvalidOperationException($"Could not find property '{propertyName}' in JSON object.");
+    public static Option<JsonNode> GetOptionalProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetProperty(propertyName)
+                  .ToOption();
 
-    public static JsonNode? TryGetProperty(this JsonObject jsonObject, string propertyName) =>
+    public static Either<string, JsonNode> TryGetProperty(this JsonObject jsonObject, string propertyName) =>
         jsonObject.TryGetPropertyValue(propertyName, out var node)
-            ? node
-            : null;
+            ? node is null
+                ? $"Property '{propertyName}' is null."
+                : Either<string, JsonNode>.Right(node)
+            : $"Property '{propertyName}' is missing.";
+
+    private static T IfLeftThrow<T>(this Either<string, T> either) =>
+        either.IfLeft(error => throw new JsonException(error));
 
     public static JsonObject GetJsonObjectProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetProperty(propertyName)
-                  .AsObject();
+        jsonObject.TryGetJsonObjectProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static JsonObject? GetNullableJsonObjectProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetNullableProperty(propertyName)
-                  .Map(node => node.AsObject());
+    public static Option<JsonObject> GetOptionalJsonObjectProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetOptionalJsonObjectProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static JsonObject? TryGetJsonObjectProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.TryGetProperty(propertyName) is JsonObject property
-            ? property
-            : null;
+    public static Either<string, Option<JsonObject>> TryGetOptionalJsonObjectProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.GetOptionalProperty(propertyName)
+                  .Sequence(node => node.TryAsJsonObject(propertyName));
+
+    public static Either<string, JsonObject> TryGetJsonObjectProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetProperty(propertyName)
+                  .Bind(node => node.TryAsJsonObject(propertyName));
+
+    private static Either<string, JsonObject> TryAsJsonObject(this JsonNode node, string propertyName)
+    {
+        return node.TryAsJsonObject()
+                   .ToEither($"Property '{propertyName}' is not a JSON object.");
+    }
 
     public static JsonArray GetJsonArrayProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetProperty(propertyName)
-                  .AsArray();
+        jsonObject.TryGetJsonArrayProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static JsonArray? GetNullableJsonArrayProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetNullableProperty(propertyName)
-                  .Map(node => node.AsArray());
+    public static Option<JsonArray> GetOptionalJsonArrayProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetOptionalJsonArrayProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static JsonArray? TryGetJsonArrayProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.TryGetProperty(propertyName) is JsonArray property
-            ? property
-            : null;
+    public static Either<string, Option<JsonArray>> TryGetOptionalJsonArrayProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.GetOptionalProperty(propertyName)
+                  .Sequence(node => node.TryAsJsonArray(propertyName));
+
+    public static Either<string, JsonArray> TryGetJsonArrayProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetProperty(propertyName)
+                  .Bind(node => node.TryAsJsonArray(propertyName));
+
+    private static Either<string, JsonArray> TryAsJsonArray(this JsonNode node, string propertyName)
+    {
+        return node.TryAsJsonArray()
+                   .ToEither($"Property '{propertyName}' is not a JSON array.");
+    }
+
+    public static Seq<JsonObject> GetJsonObjectArrayProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetJsonObjectArrayProperty(propertyName)
+                  .IfLeftThrow();
+
+    public static Option<Seq<JsonObject>> GetOptionalJsonObjectArrayProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetOptionalJsonObjectArrayProperty(propertyName)
+                  .IfLeftThrow();
+
+    public static Either<string, Option<Seq<JsonObject>>> TryGetOptionalJsonObjectArrayProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.GetOptionalProperty(propertyName)
+                  .Sequence(node => node.TryAsJsonObjectArray(propertyName));
+
+    public static Either<string, Seq<JsonObject>> TryGetJsonObjectArrayProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetProperty(propertyName)
+                  .Bind(node => node.TryAsJsonObjectArray(propertyName));
+
+    private static Either<string, Seq<JsonObject>> TryAsJsonObjectArray(this JsonNode node, string propertyName)
+    {
+        return node.TryAsJsonArray()
+                   .ToEither($"Property '{propertyName}' is not a JSON array.")
+                   .Bind(jsonArray => jsonArray.ToSeq()
+                                               .Sequence(node => node.TryAsJsonObject())
+                                               .ToEither($"Property '{propertyName}' is not an array of JSON objects."));
+    }
 
     public static JsonValue GetJsonValueProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetProperty(propertyName)
-                  .AsValue();
+        jsonObject.TryGetJsonValueProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static JsonValue? GetNullableJsonValueProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetNullableProperty(propertyName)
-                  .Map(node => node.AsValue());
-
-    public static JsonValue? TryGetJsonValueProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.TryGetProperty(propertyName) is JsonValue property
-            ? property
-            : null;
+    public static Either<string, JsonValue> TryGetJsonValueProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetProperty(propertyName)
+                  .Map(node => node.TryAsJsonValue())
+                  .Bind(option => option.ToEither($"Property '{propertyName}' is not a JSON value."));
 
     public static string GetStringProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetJsonValueProperty(propertyName)
-                  .AsString($"Property '{propertyName}''s value cannot be converted to string.");
+        jsonObject.TryGetStringProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static string? TryGetStringProperty(this JsonObject jsonObject, string propertyName) =>
+    public static Either<string, string> TryGetStringProperty(this JsonObject jsonObject, string propertyName) =>
         jsonObject.TryGetJsonValueProperty(propertyName)
-                  .Bind(JsonNodeExtensions.TryAsString);
+                  .Map(node => node.TryGetValue<string>())
+                  .Bind(option => option.ToEither($"Property '{propertyName}''s value cannot be converted to string."));
+
+    public static Guid GetGuidProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetGuidProperty(propertyName)
+                  .IfLeftThrow();
+
+    public static Either<string, Guid> TryGetGuidProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetJsonValueProperty(propertyName)
+                  .Map(node => node.TryGetValue<Guid>())
+                  .Bind(option => option.ToEither($"Property '{propertyName}''s value cannot be converted to Guid."));
+
+    public static Uri GetUriProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetUriProperty(propertyName)
+                  .IfLeftThrow();
+
+    public static Either<string, Uri> TryGetUriProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetStringProperty(propertyName)
+                  .Bind<Uri>(value => Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var uri)
+                                        ? uri
+                                        : $"Property '{propertyName}''s value cannot be converted to URI.");
 
     public static bool GetBoolProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetJsonValueProperty(propertyName)
-                  .AsBool($"Property '{propertyName}''s value cannot be converted to bool.");
+        jsonObject.TryGetBoolProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static bool? TryGetBoolProperty(this JsonObject jsonObject, string propertyName) =>
+    public static Either<string, bool> TryGetBoolProperty(this JsonObject jsonObject, string propertyName) =>
         jsonObject.TryGetJsonValueProperty(propertyName)
-                  .Bind(JsonNodeExtensions.TryAsBool);
+                  .Map(node => node.TryGetValue<bool>())
+                  .Bind(option => option.ToEither($"Property '{propertyName}''s value cannot be converted to bool."));
 
     public static int GetIntProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetJsonValueProperty(propertyName)
-                  .AsInt($"Property '{propertyName}''s value cannot be converted to int.");
+        jsonObject.TryGetIntProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static int? TryGetIntProperty(this JsonObject jsonObject, string propertyName) =>
+    public static Either<string, int> TryGetIntProperty(this JsonObject jsonObject, string propertyName) =>
         jsonObject.TryGetJsonValueProperty(propertyName)
-                  .Bind(JsonNodeExtensions.TryAsInt);
+                  .Map(node => node.TryGetValue<int>())
+                  .Bind(option => option.ToEither($"Property '{propertyName}''s value cannot be converted to int."));
 
     public static double GetDoubleProperty(this JsonObject jsonObject, string propertyName) =>
-        jsonObject.GetJsonValueProperty(propertyName)
-                  .AsDouble($"Property '{propertyName}''s value cannot be converted to double.");
+        jsonObject.TryGetDoubleProperty(propertyName)
+                  .IfLeftThrow();
 
-    public static double? TryGetDoubleProperty(this JsonObject jsonObject, string propertyName) =>
+    public static Either<string, double> TryGetDoubleProperty(this JsonObject jsonObject, string propertyName) =>
         jsonObject.TryGetJsonValueProperty(propertyName)
-                  .Bind(JsonNodeExtensions.TryAsDouble);
+                  .Map(node => node.TryGetValue<double>())
+                  .Bind(option => option.ToEither($"Property '{propertyName}''s value cannot be converted to double."));
+
+    public static DateTimeOffset GetDateTimeOffsetProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetDateTimeOffsetProperty(propertyName)
+                  .IfLeftThrow();
+
+    public static Either<string, DateTimeOffset> TryGetDateTimeOffsetProperty(this JsonObject jsonObject, string propertyName) =>
+        jsonObject.TryGetJsonValueProperty(propertyName)
+                  .Map(node => node.TryGetValue<DateTimeOffset>())
+                  .Bind(option => option.ToEither($"Property '{propertyName}''s value cannot be converted to DateTimeOffset."));
 
     public static JsonObject AddPropertyIfNotNull(this JsonObject jsonObject, string propertyName, JsonNode? property) =>
-        property is not null
-            ? jsonObject.AddProperty(propertyName, property)
-            : jsonObject;
+        property is null
+        ? jsonObject
+        : jsonObject.AddProperty(propertyName, property);
 
-    public static JsonObject AddPropertyIfNotEmpty(this JsonObject jsonObject, string propertyName, JsonArray property) =>
-        property.Any()
-            ? jsonObject.AddProperty(propertyName, property)
-            : jsonObject;
+    public static JsonObject AddProperty(this JsonObject jsonObject, string propertyName, Option<string> propertyOption)
+    {
+        return propertyOption.Map(property => jsonObject.AddProperty(propertyName, (JsonNode?)property))
+                             .IfNone(jsonObject);
+    }
 
     public static JsonObject AddProperty(this JsonObject jsonObject, string propertyName, JsonNode? property)
     {
-        var clonedObject = jsonObject.Clone();
-        clonedObject.Add(propertyName, property);
-        return clonedObject;
+        jsonObject.Add(propertyName, property);
+        return jsonObject;
     }
 
-    public static JsonObject Serialize<TKey, TValue>(IDictionary<TKey, TValue> dictionary) =>
-        JsonSerializer.SerializeToNode(dictionary)
-                     ?.AsObject()
-        ?? throw new InvalidOperationException("Failed to serialize dictionary.");
-
-    public static JsonObject ToJsonObject(this IEnumerable<KeyValuePair<string, string[]>> dictionary)
+    public static JsonObject SetProperty(this JsonObject jsonObject, string propertyName, JsonNode? property)
     {
-        var jsonObject = new JsonObject();
-
-        dictionary.Select(kvp => (kvp.Key,
-                                  Value: kvp.Value.Select(JsonNodeExtensions.FromString)
-                                                  .ToJsonArray()))
-                  .ForEach(kvp => jsonObject.Add(kvp.Key, kvp.Value));
-
+        jsonObject.Add(propertyName, property);
         return jsonObject;
+    }
+
+    public static async ValueTask<JsonObject> FromStream(Stream? stream, CancellationToken cancellationToken)
+    {
+        var result = await TryFromStream(stream, cancellationToken);
+
+        return result.IfLeftThrow();
+    }
+
+    public static async ValueTask<Either<string, JsonObject>> TryFromStream(Stream? stream, CancellationToken cancellationToken)
+    {
+        if (stream is null)
+        {
+            return "Stream cannot be null.";
+        }
+
+        if (stream.CanSeek)
+        {
+            stream.Position = 0;
+        }
+
+        try
+        {
+            var result = await JsonSerializer.DeserializeAsync<JsonObject>(stream, cancellationToken: cancellationToken);
+
+            return result is null
+                    ? "Cannot deserialize stream to JSON object."
+                    : result;
+
+        }
+        catch (JsonException jsonException)
+        {
+            return jsonException.Message;
+        }
+    }
+
+    public static async ValueTask<Stream> ToStream(this JsonObject jsonObject, CancellationToken cancellationToken)
+    {
+        var stream = new MemoryStream();
+
+        await JsonSerializer.SerializeAsync(stream, jsonObject, cancellationToken: cancellationToken);
+        stream.Position = 0;
+
+        return stream;
     }
 }
 
@@ -206,5 +308,5 @@ public static class JsonArrayExtensions
         return nodesList.ToJsonArray();
     }
 
-    public static JsonArray ToJsonArray(this IEnumerable<JsonNode> nodes) => new(nodes.ToArray());
+    public static JsonArray ToJsonArray(this IEnumerable<JsonNode?> nodes) => new(nodes.ToArray());
 }

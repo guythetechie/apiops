@@ -1,49 +1,25 @@
-﻿using common;
-using Microsoft.Extensions.Logging;
-using System.Collections.Generic;
+﻿using Microsoft.Extensions.Logging;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace extractor;
 
-internal static class Service
+#pragma warning disable CA1812 // Avoid uninstantiated internal classes
+internal sealed class ApiManagementService
+#pragma warning restore CA1812 // Avoid uninstantiated internal classes
 {
-    public static async ValueTask Export(ServiceDirectory serviceDirectory, ServiceUri serviceUri, DefaultApiSpecification defaultSpecification, IEnumerable<string>? apiNamesToExport, ListRestResources listRestResources, GetRestResource getRestResource, DownloadResource downloadResource, ILogger logger, CancellationToken cancellationToken)
+    private readonly ApiService apiService;
+    private readonly ILogger logger;
+
+    public ApiManagementService(ApiService apiService, ILogger<ApiManagementService> logger)
     {
-        logger.LogInformation("Exporting named values...");
-        await NamedValue.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
+        this.apiService = apiService;
+        this.logger = logger;
+    }
 
-        logger.LogInformation("Exporting tags...");
-        await Tag.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting version sets...");
-        await ApiVersionSet.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting loggers...");
-        await Logger.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting diagnostics...");
-        await Diagnostic.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting backends...");
-        await Backend.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting products...");
-        await Product.ExportAll(serviceDirectory, serviceUri, apiNamesToExport, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting gateways...");
-        await Gateway.ExportAll(serviceDirectory, serviceUri, apiNamesToExport, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting policy fragments...");
-        await PolicyFragment.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting service policies...");
-        await ServicePolicy.ExportAll(serviceUri, serviceDirectory, listRestResources, getRestResource, logger, cancellationToken);
-
+    public async ValueTask Export(CancellationToken cancellationToken)
+    {
         logger.LogInformation("Exporting apis...");
-        await Api.ExportAll(serviceDirectory, serviceUri, defaultSpecification, apiNamesToExport, listRestResources, getRestResource, downloadResource, logger, cancellationToken);
-
-        logger.LogInformation("Exporting subscriptions...");
-        await Subscription.ExportAll(serviceDirectory, serviceUri, listRestResources, getRestResource, logger, cancellationToken);
+        await apiService.ExportAll(cancellationToken);
     }
 }

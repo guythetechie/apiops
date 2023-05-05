@@ -1,20 +1,24 @@
-﻿using Microsoft.Extensions.Configuration;
-using System;
+﻿using LanguageExt;
+using Microsoft.Extensions.Configuration;
 
 namespace common;
 
 public static class ConfigurationExtensions
 {
-    public static string? TryGetValue(this IConfiguration configuration, string key) =>
-        configuration.TryGetSection(key)?.Value;
-
     public static string GetValue(this IConfiguration configuration, string key) =>
-        configuration.TryGetValue(key) ?? throw new InvalidOperationException($"Could not find '{key}' in configuration.");
+        configuration.TryGetValue(key)
+                     .IfNoneThrow($"Could not find '{key}' in configuration.");
 
-    public static IConfigurationSection? TryGetSection(this IConfiguration configuration, string key)
+    public static Option<string> TryGetValue(this IConfiguration configuration, string key) =>
+        configuration.TryGetSection(key)
+                     .Bind(section => Prelude.Optional(section.Value));
+
+    public static Option<IConfigurationSection> TryGetSection(this IConfiguration configuration, string key)
     {
         var section = configuration.GetSection(key);
 
-        return section.Exists() ? section : null;
+        return section.Exists()
+                ? Option<IConfigurationSection>.Some(section)
+                : Option<IConfigurationSection>.None;
     }
 }

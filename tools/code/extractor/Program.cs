@@ -2,14 +2,13 @@
 using Azure.Core.Pipeline;
 using Azure.Identity;
 using Azure.ResourceManager;
+using Azure.ResourceManager.ApiManagement;
 using common;
-using Flurl;
+using LanguageExt;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.OpenApi;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -36,67 +35,55 @@ public static class Program
     {
         builder.AddUserSecrets(typeof(Program).Assembly);
 
+        // Add YAML configuration if path is defined
         var configuration = builder.Build();
-        var yamlPath = configuration.TryGetValue("CONFIGURATION_YAML_PATH");
-
-        if (yamlPath is not null)
-        {
-            builder.AddYamlFile(yamlPath);
-        };
+        configuration.TryGetValue("CONFIGURATION_YAML_PATH")
+                     .Iter(path => builder.AddYamlFile(path));
     }
 
     private static void ConfigureServices(IServiceCollection services)
     {
-        services.AddSingleton(GetGetArmEnvironment)
+        services.AddSingleton(GetTokenCredential)
+                .AddSingletonStruct(GetArmEnvironment)
+                .AddSingleton(GetArmClient)
                 .AddSingleton(GetAuthenticatedHttpPipeline)
-                .AddSingleton(GetGetRestResource)
-                .AddSingleton(GetListRestResources)
-                .AddSingleton(GetDownloadResource)
-                .AddSingleton(GetExtractorParameters)
+                .AddSingleton(NonAuthenticatedHttpPipeline.Value)
+                .AddSingleton(GetApiManagementServiceResource)
+                .AddSingletonStruct(GetServiceDirectory)
+                .AddSingletonStruct(GetApiNamesToExport)
+                //.AddSingleton(GetListRestResources)
+                //.AddSingleton(GetDownloadResource)
+                //.AddSingleton(GetExtractorParameters)
+                .AddSingleton<ApiService>()
+                .AddSingleton<ApiManagementService>()
                 .AddHostedService<Extractor>();
     }
 
-    private static GetArmEnvironment GetGetArmEnvironment(IServiceProvider provider)
+    private static TokenCredential GetTokenCredential(IServiceProvider provider)
     {
         var configuration = provider.GetRequiredService<IConfiguration>();
 
-        var environment = configuration.TryGetValue("AZURE_CLOUD_ENVIRONMENT") switch
-        {
-            null => ArmEnvironment.AzurePublicCloud,
-            "AzureGlobalCloud" or nameof(ArmEnvironment.AzurePublicCloud) => ArmEnvironment.AzurePublicCloud,
-            "AzureChinaCloud" or nameof(ArmEnvironment.AzureChina) => ArmEnvironment.AzureChina,
-            "AzureUSGovernment" or nameof(ArmEnvironment.AzureGovernment) => ArmEnvironment.AzureGovernment,
-            "AzureGermanCloud" or nameof(ArmEnvironment.AzureGermany) => ArmEnvironment.AzureGermany,
-            _ => throw new InvalidOperationException($"AZURE_CLOUD_ENVIRONMENT is invalid. Valid values are {nameof(ArmEnvironment.AzurePublicCloud)}, {nameof(ArmEnvironment.AzureChina)}, {nameof(ArmEnvironment.AzureGovernment)}, {nameof(ArmEnvironment.AzureGermany)}")
-        };
-
-        return () => environment;
-    }
-
-    private static AuthenticatedHttpPipeline GetAuthenticatedHttpPipeline(IServiceProvider provider)
-    {
-        var configuration = provider.GetRequiredService<IConfiguration>();
-        var credential = GetTokenCredential(configuration);
-
-        var armEnvironment = provider.GetRequiredService<GetArmEnvironment>()();
-        var policy = new BearerTokenAuthenticationPolicy(credential, armEnvironment.DefaultScope);
-
-        return new AuthenticatedHttpPipeline(policy);
+        return GetTokenCredential(configuration);
     }
 
     private static TokenCredential GetTokenCredential(IConfiguration configuration)
     {
-        var authorityHost = GetAzureAuthorityHost(configuration);
+        return configuration.TryGetValue("AZURE_BEARER_TOKEN")
+                            .Map(GetCredentialFromToken)
+                            .IfNone(() =>
+                            {
+                                var authorityHost = GetAzureAuthorityHost(configuration);
 
-        var token = configuration.TryGetValue("AZURE_BEARER_TOKEN");
-        return token is null
-                ? GetDefaultAzureCredential(authorityHost)
-                : GetCredentialFromToken(token);
+                                return GetDefaultAzureCredential(authorityHost);
+                            });
     }
 
     private static Uri GetAzureAuthorityHost(IConfiguration configuration)
     {
-        return configuration.TryGetValue("AZURE_CLOUD_ENVIRONMENT") switch
+        var cloudEnvironment = configuration.TryGetValue("AZURE_CLOUD_ENVIRONMENT")
+                                            .IfNoneNull();
+
+        return cloudEnvironment switch
         {
             null => AzureAuthorityHosts.AzurePublicCloud,
             "AzureGlobalCloud" or nameof(AzureAuthorityHosts.AzurePublicCloud) => AzureAuthorityHosts.AzurePublicCloud,
@@ -124,157 +111,197 @@ public static class Program
         return DelegatedTokenCredential.Create((context, cancellationToken) => accessToken);
     }
 
-    private static DownloadResource GetDownloadResource(IServiceProvider provider)
-    {
-        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(DownloadResource));
-        var pipeline = HttpPipelineBuilder.Build(ClientOptions.Default, new UnauthenticatedPipelinePolicy());
-
-        return async (uri, cancellationToken) =>
-        {
-            logger.LogDebug("Beginning request to download resource at URI {uri}...", uri);
-            var content = await pipeline.GetContent(uri, cancellationToken);
-            logger.LogDebug("Successfully downloaded resource at URI {uri}.", uri);
-
-            return content.ToStream();
-        };
-    }
-
-    private static GetRestResource GetGetRestResource(IServiceProvider provider)
-    {
-        var authenticatedPipeline = provider.GetRequiredService<AuthenticatedHttpPipeline>();
-        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(GetRestResource));
-
-        return async (uri, cancellationToken) =>
-        {
-            logger.LogDebug("Beginning request to get REST resource at URI {uri}...", uri);
-
-            var json = await authenticatedPipeline.Pipeline.GetJsonObject(uri, cancellationToken);
-
-            if (logger.IsEnabled(LogLevel.Trace))
-            {
-                logger.LogTrace("Successfully retrieved REST resource {json} at URI {uri}.", json.ToJsonString(), uri);
-            }
-            else
-            {
-                logger.LogDebug("Successfully retrieved REST resource at URI {uri}.", uri);
-            }
-
-            return json;
-        };
-    }
-
-    private static ListRestResources GetListRestResources(IServiceProvider provider)
-    {
-        var authenticatedPipeline = provider.GetRequiredService<AuthenticatedHttpPipeline>();
-        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(ListRestResources));
-
-        return (uri, cancellationToken) =>
-        {
-            logger.LogDebug("Listing REST resources at URI {uri}...", uri);
-            return authenticatedPipeline.Pipeline.ListJsonObjects(uri, cancellationToken);
-        };
-    }
-
-    private static Extractor.Parameters GetExtractorParameters(IServiceProvider provider)
+    private static ArmEnvironment GetArmEnvironment(IServiceProvider provider)
     {
         var configuration = provider.GetRequiredService<IConfiguration>();
-        var armEnvironment = provider.GetRequiredService<GetArmEnvironment>()();
+        var environment = configuration.TryGetValue("AZURE_CLOUD_ENVIRONMENT")
+                                       .IfNoneNull();
 
-        return new Extractor.Parameters
+        return environment switch
         {
-            ApiNamesToExport = GetApiNamesToExport(configuration),
-            DefaultApiSpecification = GetApiSpecification(configuration),
-            ApplicationLifetime = provider.GetRequiredService<IHostApplicationLifetime>(),
-            DownloadResource = provider.GetRequiredService<DownloadResource>(),
-            GetRestResource = provider.GetRequiredService<GetRestResource>(),
-            ListRestResources = provider.GetRequiredService<ListRestResources>(),
-            Logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(Extractor)),
-            ServiceDirectory = GetServiceDirectory(configuration),
-            ServiceUri = GetServiceUri(configuration, armEnvironment)
+            null => ArmEnvironment.AzurePublicCloud,
+            "AzureGlobalCloud" or nameof(ArmEnvironment.AzurePublicCloud) => ArmEnvironment.AzurePublicCloud,
+            "AzureChinaCloud" or nameof(ArmEnvironment.AzureChina) => ArmEnvironment.AzureChina,
+            "AzureUSGovernment" or nameof(ArmEnvironment.AzureGovernment) => ArmEnvironment.AzureGovernment,
+            "AzureGermanCloud" or nameof(ArmEnvironment.AzureGermany) => ArmEnvironment.AzureGermany,
+            _ => throw new InvalidOperationException($"AZURE_CLOUD_ENVIRONMENT is invalid. Valid values are {nameof(ArmEnvironment.AzurePublicCloud)}, {nameof(ArmEnvironment.AzureChina)}, {nameof(ArmEnvironment.AzureGovernment)}, {nameof(ArmEnvironment.AzureGermany)}")
         };
     }
 
-    private static IEnumerable<string>? GetApiNamesToExport(IConfiguration configuration)
+    private static AuthenticatedHttpPipeline GetAuthenticatedHttpPipeline(IServiceProvider provider)
     {
-        return configuration.TryGetSection("apiNames")
-                           ?.Get<IEnumerable<string>>();
+        var credential = provider.GetRequiredService<TokenCredential>();
+        var armEnvironment = provider.GetRequiredService<ArmEnvironment>();
+        var policy = new BearerTokenAuthenticationPolicy(credential, armEnvironment.DefaultScope);
+
+        return new AuthenticatedHttpPipeline(policy);
     }
 
-    private static DefaultApiSpecification GetApiSpecification(IConfiguration configuration)
+    private static ArmClient GetArmClient(IServiceProvider provider)
     {
-        var configurationFormat = configuration.TryGetValue("API_SPECIFICATION_FORMAT")
-                                  ?? configuration.TryGetValue("apiSpecificationFormat");
+        var credential = provider.GetRequiredService<TokenCredential>();
 
-        return configurationFormat is null
-            ? new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Yaml) as DefaultApiSpecification
-            : configurationFormat switch
-            {
-                _ when configurationFormat.Equals("Wadl", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.Wadl(),
-                _ when configurationFormat.Equals("JSON", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Json),
-                _ when configurationFormat.Equals("YAML", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Yaml),
-                _ when configurationFormat.Equals("OpenApiV2Json", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi2_0, OpenApiFormat.Json),
-                _ when configurationFormat.Equals("OpenApiV2Yaml", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi2_0, OpenApiFormat.Yaml),
-                _ when configurationFormat.Equals("OpenApiV3Json", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Json),
-                _ when configurationFormat.Equals("OpenApiV3Yaml", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Yaml),
-                _ => throw new InvalidOperationException($"API specification format '{configurationFormat}' defined in configuration is not supported.")
-            };
+        var configuration = provider.GetRequiredService<IConfiguration>();
+        var subscriptionId = configuration.GetValue("AZURE_SUBSCRIPTION_ID");
+
+        var environment = provider.GetRequiredService<ArmEnvironment>();
+        var options = new ArmClientOptions
+        {
+            Environment = environment
+        };
+
+        return new ArmClient(credential, subscriptionId, options);
     }
 
-    private static ServiceDirectory GetServiceDirectory(IConfiguration configuration)
+    private static ApiManagementServiceResource GetApiManagementServiceResource(IServiceProvider provider)
     {
+        var client = provider.GetRequiredService<ArmClient>();
+
+        var configuration = provider.GetRequiredService<IConfiguration>();
+        var resourceGroupName = configuration.GetValue("AZURE_RESOURCE_GROUP_NAME");
+        var resourceGroup = client.GetDefaultSubscription()
+                                  .GetResourceGroups()
+                                  .Get(resourceGroupName);
+
+        var apiManagementServiceName = configuration.TryGetValue("API_MANAGEMENT_SERVICE_NAME")
+                                                    .IfNone(() => configuration.GetValue("apimServiceName"));
+
+        return resourceGroup.Value.GetApiManagementService(apiManagementServiceName);
+    }
+
+    private static ServiceDirectory GetServiceDirectory(IServiceProvider provider)
+    {
+        var configuration = provider.GetRequiredService<IConfiguration>();
         var directoryPath = configuration.GetValue("API_MANAGEMENT_SERVICE_OUTPUT_FOLDER_PATH");
         var directory = new DirectoryInfo(directoryPath);
         return new ServiceDirectory(directory);
     }
 
-    private static ServiceUri GetServiceUri(IConfiguration configuration, ArmEnvironment armEnvironment)
+    private static Option<Seq<ApiName>> GetApiNamesToExport(IServiceProvider provider)
     {
-        var serviceName = configuration.TryGetValue("API_MANAGEMENT_SERVICE_NAME") ?? configuration.GetValue("apimServiceName");
+        var configuration = provider.GetRequiredService<IConfiguration>();
 
-        var uri = armEnvironment.Endpoint.AppendPathSegment("subscriptions")
-                                         .AppendPathSegment(configuration.GetValue("AZURE_SUBSCRIPTION_ID"))
-                                         .AppendPathSegment("resourceGroups")
-                                         .AppendPathSegment(configuration.GetValue("AZURE_RESOURCE_GROUP_NAME"))
-                                         .AppendPathSegment("providers/Microsoft.ApiManagement/service")
-                                         .AppendPathSegment(serviceName)
-                                         .SetQueryParam("api-version", "2022-04-01-preview")
-                                         .ToUri();
-
-        return new ServiceUri(uri);
+        return configuration.TryGetSection("apiNames")
+                            .Bind(section => Prelude.Optional(section.Get<IEnumerable<string>>()))
+                            .Map(names => names.Map(name => new ApiName(name))
+                                               .ToSeq());
     }
 
-    private record AuthenticatedHttpPipeline
-    {
-        public HttpPipeline Pipeline { get; }
+    //private static DownloadResource GetDownloadResource(IServiceProvider provider)
+    //{
+    //    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(DownloadResource));
 
-        public AuthenticatedHttpPipeline(BearerTokenAuthenticationPolicy policy)
-        {
-            Pipeline = HttpPipelineBuilder.Build(ClientOptions.Default, policy);
-        }
-    };
+    //    return async (uri, cancellationToken) =>
+    //    {
+    //        logger.LogDebug("Beginning request to download resource at URI {uri}...", uri);
+    //        var content = await UnauthenticatedHttpPipeline.Value.GetContent(uri, cancellationToken);
+    //        logger.LogDebug("Successfully downloaded resource at URI {uri}.", uri);
 
-    private class UnauthenticatedPipelinePolicy : HttpPipelinePolicy
-    {
-        public override void Process(HttpMessage message, ReadOnlyMemory<HttpPipelinePolicy> pipeline)
-        {
-            RemoveAuthorizationHeader(message);
-            ProcessNext(message, pipeline);
-        }
+    //        return content.ToStream();
+    //    };
+    //}
 
-        public override async ValueTask ProcessAsync(HttpMessage message, ReadOnlyMemory<HttpPipelinePolicy> pipeline)
-        {
-            RemoveAuthorizationHeader(message);
-            await ProcessNextAsync(message, pipeline);
-        }
+    //private static GetRestResource GetGetRestResource(IServiceProvider provider)
+    //{
+    //    var authenticatedPipeline = provider.GetRequiredService<AuthenticatedHttpPipeline>();
+    //    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(GetRestResource));
 
-        private static void RemoveAuthorizationHeader(HttpMessage message)
-        {
-            if (message.Request.Headers.TryGetValue(HttpHeader.Names.Authorization, out var _))
-            {
-                message.Request.Headers.Remove(HttpHeader.Names.Authorization);
-            }
-        }
-    }
+    //    return async (uri, cancellationToken) =>
+    //    {
+    //        logger.LogDebug("Beginning request to get REST resource at URI {uri}...", uri);
 
-    private delegate ArmEnvironment GetArmEnvironment();
+    //        var json = await authenticatedPipeline.Value.GetJsonObject(uri, cancellationToken);
+
+    //        if (logger.IsEnabled(LogLevel.Trace))
+    //        {
+    //            logger.LogTrace("Successfully retrieved REST resource {json} at URI {uri}.", json.ToJsonString(), uri);
+    //        }
+    //        else
+    //        {
+    //            logger.LogDebug("Successfully retrieved REST resource at URI {uri}.", uri);
+    //        }
+
+    //        return json;
+    //    };
+    //}
+
+    //private static ListRestResources GetListRestResources(IServiceProvider provider)
+    //{
+    //    var authenticatedPipeline = provider.GetRequiredService<AuthenticatedHttpPipeline>();
+    //    var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(ListRestResources));
+
+    //    return (uri, cancellationToken) =>
+    //    {
+    //        logger.LogDebug("Listing REST resources at URI {uri}...", uri);
+    //        return authenticatedPipeline.Value.ListJsonObjects(uri, cancellationToken);
+    //    };
+    //}
+
+    //private static Extractor.Parameters GetExtractorParameters(IServiceProvider provider)
+    //{
+    //    var configuration = provider.GetRequiredService<IConfiguration>();
+    //    var armEnvironment = provider.GetRequiredService<ArmEnvironment>();
+
+    //    return new Extractor.Parameters
+    //    {
+    //        ApiNamesToExport = GetApiNamesToExport(configuration),
+    //        DefaultApiSpecification = GetApiSpecification(configuration),
+    //        ApplicationLifetime = provider.GetRequiredService<IHostApplicationLifetime>(),
+    //        DownloadResource = provider.GetRequiredService<DownloadResource>(),
+    //        GetRestResource = provider.GetRequiredService<GetRestResource>(),
+    //        ListRestResources = provider.GetRequiredService<ListRestResources>(),
+    //        Logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(Extractor)),
+    //        ServiceDirectory = GetServiceDirectory(configuration),
+    //        ServiceUri = GetServiceUri(configuration, armEnvironment)
+    //    };
+    //}
+
+    //private static IEnumerable<string>? GetApiNamesToExport(IConfiguration configuration)
+    //{
+    //    return configuration.TryGetSection("apiNames")
+    //                       ?.Get<IEnumerable<string>>();
+    //}
+
+    //private static DefaultApiSpecification GetApiSpecification(IConfiguration configuration)
+    //{
+    //    var configurationFormat = configuration.TryGetValue("API_SPECIFICATION_FORMAT")
+    //                              ?? configuration.TryGetValue("apiSpecificationFormat");
+
+    //    return configurationFormat is null
+    //        ? new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Yaml) as DefaultApiSpecification
+    //        : configurationFormat switch
+    //        {
+    //            _ when configurationFormat.Equals("Wadl", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.Wadl(),
+    //            _ when configurationFormat.Equals("JSON", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Json),
+    //            _ when configurationFormat.Equals("YAML", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Yaml),
+    //            _ when configurationFormat.Equals("OpenApiV2Json", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi2_0, OpenApiFormat.Json),
+    //            _ when configurationFormat.Equals("OpenApiV2Yaml", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi2_0, OpenApiFormat.Yaml),
+    //            _ when configurationFormat.Equals("OpenApiV3Json", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Json),
+    //            _ when configurationFormat.Equals("OpenApiV3Yaml", StringComparison.OrdinalIgnoreCase) => new DefaultApiSpecification.OpenApi(OpenApiSpecVersion.OpenApi3_0, OpenApiFormat.Yaml),
+    //            _ => throw new InvalidOperationException($"API specification format '{configurationFormat}' defined in configuration is not supported.")
+    //        };
+    //}
+
+    //private static ServiceDirectory GetServiceDirectory(IConfiguration configuration)
+    //{
+    //    var directoryPath = configuration.GetValue("API_MANAGEMENT_SERVICE_OUTPUT_FOLDER_PATH");
+    //    var directory = new DirectoryInfo(directoryPath);
+    //    return new ServiceDirectory(directory);
+    //}
+
+    //private static ServiceUri GetServiceUri(IConfiguration configuration, ArmEnvironment armEnvironment)
+    //{
+    //    var serviceName = configuration.TryGetValue("API_MANAGEMENT_SERVICE_NAME") ?? configuration.GetValue("apimServiceName");
+
+    //    var uri = armEnvironment.Endpoint.AppendPathSegment("subscriptions")
+    //                                     .AppendPathSegment(configuration.GetValue("AZURE_SUBSCRIPTION_ID"))
+    //                                     .AppendPathSegment("resourceGroups")
+    //                                     .AppendPathSegment(configuration.GetValue("AZURE_RESOURCE_GROUP_NAME"))
+    //                                     .AppendPathSegment("providers/Microsoft.ApiManagement/service")
+    //                                     .AppendPathSegment(serviceName)
+    //                                     .SetQueryParam("api-version", "2022-04-01-preview")
+    //                                     .ToUri();
+
+    //    return new ServiceUri(uri);
+    //}
 }

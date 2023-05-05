@@ -1,39 +1,28 @@
-﻿using common;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace extractor;
 
-internal class Extractor : BackgroundService
+#pragma warning disable CA1812 // Avoid uninstantiated internal classes
+internal sealed class Extractor : BackgroundService
+#pragma warning restore CA1812 // Avoid uninstantiated internal classes
 {
-    public record Parameters
-    {
-        public required ServiceDirectory ServiceDirectory { get; init; }
-        public required ServiceUri ServiceUri { get; init; }
-        public required DefaultApiSpecification DefaultApiSpecification { get; init; }
-        public required ListRestResources ListRestResources { get; init; }
-        public required GetRestResource GetRestResource { get; init; }
-        public required DownloadResource DownloadResource { get; init; }
-        public required ILogger Logger { get; init; }
-        public required IHostApplicationLifetime ApplicationLifetime { get; init; }
-        public IEnumerable<string>? ApiNamesToExport { get; init; }
-    }
+    private readonly ApiManagementService apiManagementService;
+    private readonly ILogger logger;
+    private readonly IHostApplicationLifetime applicationLifetime;
 
-    private readonly Parameters parameters;
-
-    public Extractor(Parameters parameters)
+    public Extractor(ApiManagementService apiManagementService, ILogger<Extractor> logger, IHostApplicationLifetime applicationLifetime)
     {
-        this.parameters = parameters;
+        this.apiManagementService = apiManagementService;
+        this.logger = logger;
+        this.applicationLifetime = applicationLifetime;
     }
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        var logger = parameters.Logger;
-
         try
         {
             logger.LogInformation("Beginning execution...");
@@ -54,20 +43,12 @@ internal class Extractor : BackgroundService
         }
         finally
         {
-            parameters.ApplicationLifetime.StopApplication();
+            applicationLifetime.StopApplication();
         }
     }
 
     private async ValueTask ExportService(CancellationToken cancellationToken)
     {
-        await Service.Export(parameters.ServiceDirectory,
-                             parameters.ServiceUri,
-                             parameters.DefaultApiSpecification,
-                             parameters.ApiNamesToExport,
-                             parameters.ListRestResources,
-                             parameters.GetRestResource,
-                             parameters.DownloadResource,
-                             parameters.Logger,
-                             cancellationToken);
+        await apiManagementService.Export(cancellationToken);
     }
 }

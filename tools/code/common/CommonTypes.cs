@@ -1,4 +1,3 @@
-using Flurl;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -10,10 +9,8 @@ using System.Threading.Tasks;
 
 namespace common;
 
-public sealed record ArtifactPath
+public readonly record struct ArtifactPath
 {
-    private readonly string value;
-
     public ArtifactPath(string value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -21,10 +18,12 @@ public sealed record ArtifactPath
             throw new ArgumentException($"Record path cannot be null or whitespace.", nameof(value));
         }
 
-        this.value = value;
+        Value = value;
     }
 
-    public override string ToString() => value;
+    public string Value { get; }
+
+    public override string ToString() => Value;
 }
 
 public static class ArtifactPathExtensions
@@ -144,7 +143,7 @@ public static class ArtifactDirectoryExtensions
 {
     public static bool PathEquals(this IArtifactDirectory directory, [NotNullWhen(true)] DirectoryInfo? directoryInfo)
     {
-        return directory.Path.ToString().Equals(directoryInfo?.FullName);
+        return directory.Path.ToString().Equals(directoryInfo?.FullName, StringComparison.Ordinal);
     }
 
     public static DirectoryInfo GetDirectoryInfo(this IArtifactDirectory directory)
@@ -167,16 +166,4 @@ public static class ArtifactDirectoryExtensions
         return directory.GetDirectoryInfo()
                         .EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true });
     }
-}
-
-public interface IArtifactUri
-{
-    public Uri Uri { get; }
-}
-
-public static class ArtifactUriExtensions
-{
-    public static Uri AppendPath(this IArtifactUri artifactUri, string path) =>
-        artifactUri.Uri.AppendPathSegment(path)
-                       .ToUri();
 }
